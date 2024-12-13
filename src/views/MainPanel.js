@@ -1,5 +1,7 @@
+/*global KeyboardEvent*/
 import {BodyText} from '@enact/sandstone/BodyText';
 import {Panel, Header} from '@enact/sandstone/Panels';
+import Spotlight from '@enact/spotlight';
 import {
 	GestureRecognizer,
 	FilesetResolver,
@@ -7,11 +9,16 @@ import {
 } from '@mediapipe/tasks-vision';
 import {useEffect, useRef, useState} from 'react';
 
+import GestureSampler from '../components/GestureSampler';
+import PopupTabLayoutByGesture from './PopupTabLayoutByGesture';
+
 import css from './MainPanel.module.less';
 
 let gestureRecognizer;
 const videoHeight = '360px';
 const videoWidth = '480px';
+
+const sampler = new GestureSampler(1000);
 
 const MainPanel = (props) => {
 	const video = useRef();
@@ -19,25 +26,24 @@ const MainPanel = (props) => {
 	let canvasCtx;
 	let lastVideoTime = -1;
 	let results = undefined;
-	let deviceId;
 	const [output, setOutput] = useState('Welcome!');
-	
+
 	const createGestureRecognizer = async () => {
 		const vision = await FilesetResolver.forVisionTasks('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm');
 		gestureRecognizer = await GestureRecognizer.createFromOptions(vision, {
 		  baseOptions: {
-			modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/gesture_recognizer/gesture_recognizer/float16/1/gesture_recognizer.task',
+			modelAssetPath: './thumbed_5way_recognizer.task',
 			delegate: 'GPU'
 		  },
 		  runningMode: 'VIDEO'
 		});
 	};
-	
+
 	// Check if webcam access is supported.
 	function hasGetUserMedia () {
 		return !!(typeof window !== 'undefined' && window.navigator.mediaDevices && window.navigator.mediaDevices.getUserMedia);
 	}
-	
+
 	// Enable the live webcam view and start detection.
 	function enableCam () {
 		if (!gestureRecognizer) {
@@ -54,7 +60,24 @@ const MainPanel = (props) => {
 			});
 		}
 	}
-	
+
+	function moveSpotlight (direction) {
+		if (direction === 'ok') {
+			Spotlight.getCurrent()?.click();
+		} else if (direction === 'left') {
+			if (!Spotlight.move('left')) {
+				setTimeout(() => {
+					Spotlight.getCurrent()?.dispatchEvent(new KeyboardEvent('keydown', {key: 'left', keyCode: 37, bubbles: true}));
+					setTimeout(() => {
+						Spotlight.getCurrent()?.dispatchEvent(new KeyboardEvent('keyup', {key: 'left', keyCode: 37, bubbles: true}));
+					}, 100);
+				}, 100);
+			}
+		} else {
+			Spotlight.move(direction);
+		}
+	}
+
 	async function predict() {
 		const webcamElement = video.current;
 		const canvasElement = canvas.current;
@@ -63,17 +86,17 @@ const MainPanel = (props) => {
 			lastVideoTime = webcamElement.currentcurrentTime;
 			results = gestureRecognizer.recognizeForVideo(webcamElement, nowInMs);
 		}
-	  
+
 		canvasCtx = canvas.current.getContext('2d');
 		canvasCtx.save();
 		canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
 		const drawingUtils = new DrawingUtils(canvasCtx);
-	  
+
 		canvasElement.style.height = videoHeight;
 		webcamElement.style.height = videoHeight;
 		canvasElement.style.width = videoWidth;
 		webcamElement.style.width = videoWidth;
-	  
+
 		if (results.landmarks) {
 			for (const landmarks of results.landmarks) {
 				drawingUtils.drawConnectors(
@@ -97,7 +120,9 @@ const MainPanel = (props) => {
 			results.gestures[0][0].score * 100
 			).toFixed(2);
 			const handedness = results.handednesses[0][0].displayName;
-			setOutput(`GestureRecognizer: ${categoryName}\n Confidence: ${categoryScore} %\n Handedness: ${handedness}`);
+			console.log(`GestureRecognizer: ${categoryName}\n Confidence: ${categoryScore} %\n Handedness: ${handedness}`);
+			//console.log("org gesture: ", gesture, " categoryName: ", categoryName);
+			sampler.sample(categoryName, categoryScore, moveSpotlight);
 		} else {
 			setOutput('');
 		}
@@ -105,7 +130,7 @@ const MainPanel = (props) => {
 		if (typeof window !== 'undefined') {
 			window.requestAnimationFrame(predict);
 		}
-	}	  
+	}
 
 	useEffect (() => {
 		createGestureRecognizer().then(() => {
@@ -114,19 +139,19 @@ const MainPanel = (props) => {
 			console.log(error.message);
 		});
 	}, []);
-	
+
 	return (
 		<Panel {...props}>
 			<Header title="Gesture Control PoC" />
 			<div>
-				<video className={css.video} autoPlay playsInline ref={video}></video>
+				<video className={css.video} autoPlay playsInline ref={video} />
 				<canvas
 					className={css.outputCanvas}
 					width='1280'
 					height='720'
 					ref={canvas}
-				></canvas>
-				<br />
+				/>
+				<PopupTabLayoutByGesture />
 				<br />
 				<BodyText className={css.output}>{output}</BodyText>
 			</div>
